@@ -3,6 +3,7 @@
 #include <string>
 #include <cstring>
 #include <iostream>
+#include <stdexcept>
 #include <unistd.h>
 #include "dirent.h"
 #include "CirqueBootloaderCollection.h"
