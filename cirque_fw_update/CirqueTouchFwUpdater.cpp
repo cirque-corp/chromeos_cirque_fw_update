@@ -359,21 +359,10 @@ int main (int argc, char * argv[])
 			devices.push_back(string(argv[2]));
 		}
 		
-		try
+		for(int i = 0; i < devices.size(); ++i)
 		{
-			for(int i = 0; i < devices.size(); ++i)
-			{
-				printf("Querying device %s\n", devices[i].c_str());
-				dump_raw_data(devices[i]);
-			}
-		}
-		catch(const runtime_error &e)
-		{
-			printf("Caught runtime error: %s", e.what());
-		}
-		catch(const exception &e)
-		{
-			printf("Caught: %s", e.what());
+			printf("Querying device %s\n", devices[i].c_str());
+			dump_raw_data(devices[i]);
 		}
 
 		return 0;
@@ -391,41 +380,15 @@ int main (int argc, char * argv[])
 			else if( strcmp( argv[1], "-n" ) == 0 )
 			{
 				// Get the version number.
-				try
-				{
-					printf("Querying device %s\n", device.c_str());
-					ret = get_device_attributes(device);
-				}
-				catch(const runtime_error &e)
-				{
-					printf("Caught runtime error: %s", e.what());
-					ret = -1;
-				}
-				catch(const exception &e)
-				{
-					printf("Caught: %s", e.what());
-					ret = -1;
-				}
+				printf("Querying device %s\n", device.c_str());
+				ret = get_device_attributes(device);
 			}
 			else
 			{
 				// Update firmware.
 				fw_file = argv[1];
-				try
-				{
-					printf("Updating device %s with firmware from %s\n", device.c_str(), fw_file.c_str());
-					ret = update_firmware(device, fw_file);
-				}
-				catch(const runtime_error &e)
-				{
-					printf("Caught runtime error: %s", e.what());
-					ret = -1;
-				}
-				catch(const exception &e)
-				{
-					printf("Caught: %s", e.what());
-					ret = -1;
-				}
+				printf("Updating device %s with firmware from %s\n", device.c_str(), fw_file.c_str());
+				ret = update_firmware(device, fw_file);
 			}
 			return ret;
 		default:

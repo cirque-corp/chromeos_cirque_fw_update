@@ -29,8 +29,7 @@ CirqueBootloaderCollection::CirqueBootloaderCollection(string& device_path, int 
 
 	if(this->fd == -1)
 	{
-		string errorMsg = "Could not open path: " + device_path + "\n";
-		throw std::runtime_error(errorMsg);
+		printf( "Could not open path: %s\n", device_path.c_str() );
 	}
 }
 
@@ -156,8 +155,7 @@ void CirqueBootloaderCollection::ParseReadDataFromStatus(vector<uint8_t> &status
 	// Check length
 	if ( length > ( this->report_length - response_start_index - 6 ) )
 	{
-		string errorMsg = "CirqueBootloaderCollection::ParseReadDataFromStatus: bad length: " + to_string(length) + "\n";
-		throw std::runtime_error(errorMsg);
+		printf( "CirqueBootloaderCollection::ParseReadDataFromStatus: bad length: %d\n", length );
 	}
 
 	// Create buffer of just the applicable data
@@ -251,8 +249,7 @@ void CirqueBootloaderCollection::ExtendedRead(uint32_t addr, uint16_t length, ve
 	int bytes_sent = this->BootloaderSetFeature(buf);
 	if(bytes_sent != this->report_length)
 	{
-		string errorMsg = "CirqueBootloaderCollection::ExtendedRead: Sent bytes didn't equal correct number. " + std::to_string(bytes_sent) + "\n";
-		throw std::runtime_error(errorMsg);
+		printf( "CirqueBootloaderCollection::ExtendedRead: Sent bytes didn't equal correct number: %d\n", bytes_sent );
 	}
 	
 	this->report_length = this->BL_REPORT_LENGTH;
@@ -261,8 +258,7 @@ void CirqueBootloaderCollection::ExtendedRead(uint32_t addr, uint16_t length, ve
 	int bytes_received = this->BootloaderGetFeature(buf);
 	if(bytes_received != this->report_length)
 	{
-		string errorMsg = "CirqueBootloaderCollection::ExtendedRead: Received bytes didn't equal correct number. " + std::to_string(bytes_received) + "\n";
-		throw std::runtime_error(errorMsg);
+		printf( "CirqueBootloaderCollection::ExtendedRead: Received bytes didn't equal correct number: %d\n", bytes_received );
 	}
 
 	this->ParseReadDataFromStatus(buf, addr, length, return_buffer);
@@ -288,8 +284,7 @@ void CirqueBootloaderCollection::ExtendedWrite(uint32_t addr, vector<uint8_t> &b
 	int bytes_sent = this->BootloaderSetFeature(buf);
 	if(bytes_sent != this->report_length)
 	{
-		string errorMsg = "CirqueBootloaderCollection::ExtendedWrite: Bytes sent did not match. " + std::to_string(bytes_sent) + "\n";
-		throw std::runtime_error(errorMsg);
+		printf( "CirqueBootloaderCollection::ExtendedWrite: Bytes sent did not match: %d\n", bytes_sent );
 	}
 }
 
