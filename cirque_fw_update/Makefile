@@ -13,7 +13,7 @@
 # limitations under the License.
 
 cirque_touch_fw_update: clean
-	g++ -std=c++0x CirqueBootloaderCollection.cpp CirqueDevData.cpp CirqueHexFileRecord.cpp CirqueHexFileParser.cpp CirqueTouchFwUpdater.cpp -o cirque_touch_fw_update -static
+	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(LDFLAGS) CirqueBootloaderCollection.cpp CirqueDevData.cpp CirqueHexFileRecord.cpp CirqueHexFileParser.cpp CirqueTouchFwUpdater.cpp -o cirque_touch_fw_update
 
 clean:
 	-rm cirque_touch_fw_update
