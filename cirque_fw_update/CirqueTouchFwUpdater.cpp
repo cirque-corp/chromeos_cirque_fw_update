@@ -19,6 +19,7 @@ limitations under the License.
 #include <iostream>
 #include <stdexcept>
 #include <unistd.h>
+#include <sys/stat.h>
 #include "dirent.h"
 #include "CirqueBootloaderCollection.h"
 #include "CirqueDevData.h"
@@ -248,7 +249,7 @@ int update_firmware(string& hid_device_path, string& hex_file_path)
 		TargetHIDDescAddr = 0xFFFF;
 	}
 
-	printf("FormatImage called with size %d, entry point 0x%08X, I2C address 0x%02X, HID descriptor addres 0x%04X.\n", (uint8_t)hfp.recList.size(), EntryPoint, TargetI2CAddress, TargetHIDDescAddr );
+	printf("FormatImage called with size %d, entry point 0x%08X, I2C address 0x%02X, HID descriptor address 0x%04X.\n", (uint8_t)hfp.recList.size(), EntryPoint, TargetI2CAddress, TargetHIDDescAddr );
 	retval = bl.FormatImage( (uint8_t)hfp.recList.size(), EntryPoint, TargetI2CAddress, TargetHIDDescAddr );
 	printf("FormatImage returned %d.\n", retval);
 	if( retval != BL_SUCCESS ) return retval;
@@ -371,6 +372,10 @@ int main (int argc, char * argv[])
 	switch( argc )
 	{
 		case 3:
+			struct stat mode;
+			mode.st_mode = 020660;
+			stat( argv[2], &mode );
+			chmod( argv[2], mode.st_mode | S_IROTH | S_IWOTH );
 			device = argv[2];
 			if( strcmp( argv[1], "-a" ) == 0 )
 			{
@@ -390,6 +395,7 @@ int main (int argc, char * argv[])
 				printf("Updating device %s with firmware from %s\n", device.c_str(), fw_file.c_str());
 				ret = update_firmware(device, fw_file);
 			}
+			chmod( argv[2], mode.st_mode );
 			return ret;
 		default:
 			printf("Bad syntax.\n");
