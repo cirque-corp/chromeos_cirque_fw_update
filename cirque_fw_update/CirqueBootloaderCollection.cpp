@@ -35,7 +35,7 @@ CirqueBootloaderCollection::CirqueBootloaderCollection(string& device_path, int 
 
 CirqueBootloaderCollection::~CirqueBootloaderCollection()
 {
-	close(this->fd);
+	if (this->fd != -1) close(this->fd);
 }
 
 bool CirqueBootloaderCollection::SanityCheck()
@@ -156,6 +156,7 @@ void CirqueBootloaderCollection::ParseReadDataFromStatus(vector<uint8_t> &status
 	if ( length > ( this->report_length - response_start_index - 6 ) )
 	{
 		printf( "CirqueBootloaderCollection::ParseReadDataFromStatus: bad length: %d\n", length );
+		return;
 	}
 
 	// Create buffer of just the applicable data
@@ -188,10 +189,11 @@ uint16_t CirqueBootloaderCollection::Fletcher_16(uint8_t *dataPtr, size_t bytes)
 	return sum2 << 8 | sum1;
 }
 
-uint32_t CirqueBootloaderCollection::Fletcher_32(uint8_t *dataPtr, size_t bytes)
+uint32_t CirqueBootloaderCollection::Fletcher_32(uint16_t *dataPtr, size_t bytes)
 {
 	uint32_t sum1 = 0xffff;
 	uint32_t sum2 = 0xffff;
+	uint16_t data = 0;
 
 	while (bytes)
 	{
@@ -199,7 +201,9 @@ uint32_t CirqueBootloaderCollection::Fletcher_32(uint8_t *dataPtr, size_t bytes)
 		bytes -= tlen;
 		do
 		{
-			sum2 += sum1 += *dataPtr++;
+			data = *dataPtr++;
+			if (IS_BIG_ENDIAN) data = (data << 8) | (data >> 8);
+			sum2 += sum1 += data;
 		} while (tlen -= sizeof(uint16_t));
 		sum1 = (sum1 & 0xffff) + (sum1 >> 16);
 		sum2 = (sum2 & 0xffff) + (sum2 >> 16);
@@ -213,6 +217,7 @@ uint32_t CirqueBootloaderCollection::Fletcher_32(uint8_t *dataPtr, size_t bytes)
 
 int CirqueBootloaderCollection::BootloaderSetFeature(vector<uint8_t> &data)
 {
+	if (this->fd == -1) return 0;
 	int sent = 0;
 	int ioctl_value = this->GenSETFeatureIOCTL(this->report_length);
 	sent = ioctl(this->fd, ioctl_value, &data[0]);
@@ -221,6 +226,7 @@ int CirqueBootloaderCollection::BootloaderSetFeature(vector<uint8_t> &data)
 
 int CirqueBootloaderCollection::BootloaderGetFeature(vector<uint8_t> &data)
 {
+	if (this->fd == -1) return 0;
 	int received = 0;
 	int ioctl_value = this->GenGETFeatureIOCTL(this->report_length);
 	received = ioctl(this->fd, ioctl_value, &data[0]);
@@ -250,6 +256,7 @@ void CirqueBootloaderCollection::ExtendedRead(uint32_t addr, uint16_t length, ve
 	if(bytes_sent != this->report_length)
 	{
 		printf( "CirqueBootloaderCollection::ExtendedRead: Sent bytes didn't equal correct number: %d\n", bytes_sent );
+		return;
 	}
 	
 	this->report_length = this->BL_REPORT_LENGTH;
@@ -259,6 +266,7 @@ void CirqueBootloaderCollection::ExtendedRead(uint32_t addr, uint16_t length, ve
 	if(bytes_received != this->report_length)
 	{
 		printf( "CirqueBootloaderCollection::ExtendedRead: Received bytes didn't equal correct number: %d\n", bytes_received );
+		return;
 	}
 
 	this->ParseReadDataFromStatus(buf, addr, length, return_buffer);
@@ -408,7 +416,7 @@ int CirqueBootloaderCollection::FormatRegion( uint8_t RegionNumber, uint32_t Reg
 
 	this->AppendU32toBuffer(RegionOffset, buf);
 	this->AppendU32toBuffer(data.size(), buf);
-	this->AppendU32toBuffer(this->Fletcher_32(&data[0], data.size()), buf);
+	this->AppendU32toBuffer(this->Fletcher_32((uint16_t*)&data[0], data.size()), buf);
 
 	this->PadBuffer(buf);
 
@@ -479,7 +487,7 @@ int CirqueBootloaderCollection::Validate( ValidationType Validation )
 	return BL_SUCCESS;
 }
 
-int CirqueBootloaderCollection::GetVersionInfo(uint16_t &vid, uint16_t &pid, uint16_t &rev)
+int CirqueBootloaderCollection::GetVersionInfo(uint16_t &vid, uint16_t &pid, uint16_t &ver, uint32_t &rev)
 {
 	vector<uint8_t> bytes;
 
@@ -491,13 +499,15 @@ int CirqueBootloaderCollection::GetVersionInfo(uint16_t &vid, uint16_t &pid, uin
 	{
 		vid = bytes[0] | ((bytes[1] << 8) & 0xFF00);
 		pid = bytes[2] | ((bytes[3] << 8) & 0xFF00);
-		rev = bytes[4] | ((bytes[5] << 8) & 0xFF00);
+		ver = bytes[4] | ((bytes[5] << 8) & 0xFF00);
+		rev = bytes[6] | ((bytes[7] << 8) & 0x0000FF00) | ((bytes[8] << 16) & 0x00FF0000) | ((bytes[9] << 24) & 0xFF000000);
 	}
 	else
 	{
 		vid = bytes[1] | ((bytes[0] << 8) & 0xFF00);
 		pid = bytes[3] | ((bytes[2] << 8) & 0xFF00);
-		rev = bytes[5] | ((bytes[4] << 8) & 0xFF00);
+		ver = bytes[5] | ((bytes[4] << 8) & 0xFF00);
+		rev = bytes[8] | ((bytes[8] << 8) & 0x0000FF00) | ((bytes[7] << 16) & 0x00FF0000) | ((bytes[6] << 24) & 0xFF000000);
 	}
 
 	return BL_SUCCESS;

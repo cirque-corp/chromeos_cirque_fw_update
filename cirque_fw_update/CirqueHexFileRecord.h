@@ -42,7 +42,8 @@ public:
 private:
 	RecordType rtype;
 	uint32_t address;
-	uint32_t extendedAddress = 0;
+	static uint32_t extendedAddress;
+	static uint32_t segmentAddress;
 	bool valid = false;
 
 public:

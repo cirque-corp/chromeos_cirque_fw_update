@@ -17,6 +17,9 @@ limitations under the License.
 #include <deque>
 #include "CirqueHexFileRecord.h"
 
+uint32_t CirqueHexFileRecord::extendedAddress = 0;
+uint32_t CirqueHexFileRecord::segmentAddress = 0;
+
 CirqueHexFileRecord::CirqueHexFileRecord( string& s )
 {
 	uint32_t checksum = 0;
@@ -57,7 +60,7 @@ CirqueHexFileRecord::CirqueHexFileRecord( string& s )
 				address <<= 8;
 				address |= Q.front();
 				Q.pop_front();
-				address |= extendedAddress;
+				address += segmentAddress + extendedAddress;
 				rtype = (RecordType)Q.front();
 				Q.pop_front();
 
@@ -70,12 +73,20 @@ CirqueHexFileRecord::CirqueHexFileRecord( string& s )
 					case rt_end_of_file:
 						break;
 					case rt_extended_segment_address:
-						extendedAddress = getAddress();
+                        segmentAddress = Q.front();
+                        segmentAddress <<= 8;
+                        Q.pop_front();
+                        segmentAddress |= Q.front();
+                        segmentAddress *= 16;
 						break;
 					case rt_start_segment_address:
 						break;
 					case rt_extended_linear_address:
-						extendedAddress = getAddress();
+                        extendedAddress = Q.front();
+                        extendedAddress <<= 8;
+                        Q.pop_front();
+                        extendedAddress |= Q.front();
+                        extendedAddress <<= 16;
 						break;
 					case rt_start_linear_address:
 						break;

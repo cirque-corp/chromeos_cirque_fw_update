@@ -25,6 +25,10 @@ limitations under the License.
 #include "CirqueDevData.h"
 #include "CirqueHexFileParser.h"
 
+#define VERSION "2.0.7"
+#define DATE "2024-09-17"
+#define COPYRIGHT "Copyright (c) 2024 Cirque Corporation\nAll rights reserved."
+
 using namespace std;
 
 vector<string> find_cirque_devices(void)
@@ -135,39 +139,82 @@ void dump_raw_data(string hid_device_path)
 	bl.ExtendedWrite(0x200E000A, write_data);
 }
 
+int IsBootloader(uint16_t sentinel)
+{
+	switch (sentinel)
+	{
+	case 0xC35A:
+	case 0x6C42: //'lB'
+		return 1;
+	case 0x5AC3:
+	case 0x6D49: //'mI'
+	case 0x426C: //'Bl' for old firmware
+		return 0;
+	default:
+		return -1;
+	}
+	return -1;
+}
+
 uint16_t get_device_attributes(string& hid_device_path)
 {
 	int retval = BL_FAILURE;
 	CirqueBootloaderCollection bl(hid_device_path);
 
-	uint16_t vid = 0, pid = 0, rev = 0;
-	if( bl.GetVersionInfo(vid, pid, rev) == BL_SUCCESS )
+	uint16_t vid = 0, pid = 0, ver = 0;
+	uint32_t rev = 0;
+	if( bl.GetVersionInfo(vid, pid, ver, rev) == BL_SUCCESS )
 	{
-		printf("  1: VID %04X  PID %04X  REV %04X\n", vid, pid, rev );
+		printf("  %s: VID %04X  PID %04X  VER %04X  REV %08X\n", hid_device_path.c_str(), vid, pid, ver, rev );
 	}
 	else
 	{
 		printf("Failed to get device firmware version.\n" );
 	}
-	return rev;
+	return ver;
 }
 
-uint16_t get_fw_version(string& hid_device_path)
+int get_fw_version(string& hid_device_path, uint16_t& ver)
 {
-	int retval = BL_FAILURE;
+	uint16_t vid = 0, pid = 0;
+	uint32_t rev = 0;
 	CirqueBootloaderCollection bl(hid_device_path);
+	CirqueBootloaderStatus status;
 
-	uint16_t vid = 0, pid = 0, rev = 0;
-	if( bl.GetVersionInfo(vid, pid, rev) == BL_SUCCESS )
+	if (!bl.IsConnected()) return BL_FAILURE;
+	
+	int ret = bl.GetStatus(status);
+	if (ret != BL_SUCCESS) return ret;
+
+	// Return version 00.00 if the device is in bootloader mode.
+	if (IsBootloader(status.Sentinel) == 1)
 	{
-		printf("%02X.%02X\n", rev >> 8, rev & 0xFF );
+		ver = 0;
 	}
-	return retval;
+	else
+	{
+		bl.GetVersionInfo(vid, pid, ver, rev);
+	}
+
+	return BL_SUCCESS;
 }
 
 int update_firmware(string& hid_device_path, string& hex_file_path)
 {
 	CirqueBootloaderCollection bl(hid_device_path);
+	if (!bl.IsConnected()) return BL_FAILURE;
+
+	// Sanity check to get the endianness.
+	int retry = 0;
+	if (!bl.SanityCheck())
+	{
+		// We couldn't get endianness. We may be in bootloader mode.
+		// Assume the firmware is little-endian and try it.
+		// If it fails, we'll try big-endian.
+		bl.IS_BIG_ENDIAN = 0;
+		retry = 1;
+		printf("Sanity check failed.\n");
+	}
 
 	// Load and parse the hex file.
 	CirqueHexFileParser hfp(hex_file_path);
@@ -185,6 +232,7 @@ int update_firmware(string& hid_device_path, string& hex_file_path)
 	}
 	printf("Finished parsing %s: %d records.\n", hex_file_path.c_str(), (int)hfp.recList.size());
 
+	FirmwareUpdateSequence:
 	// Get timing values.
 	uint32_t FormatImageDelay = 100;
 	uint32_t FormatRegionsPageDelay = 50;
@@ -203,7 +251,7 @@ int update_firmware(string& hid_device_path, string& hex_file_path)
 		retval = bl.Reset();
 		printf("Reset returned %d.\n", retval);
 		if( retval != BL_SUCCESS ) return retval;
-		usleep(10000);
+		usleep(100000);
 
 		// Check status.
 		if (bl.GetStatus( status ) != BL_SUCCESS || status.LastError != NV_err_none)
@@ -321,6 +369,15 @@ int update_firmware(string& hid_device_path, string& hex_file_path)
 	if (bl.GetStatus( status ) != BL_SUCCESS || status.LastError != NV_err_none)
 	{
 		printf("GetStatus after image validation failed with error %d.\n", status.LastError);
+		// If we failed with checksum mismatch, it's possible we used the wrong endianness.
+		// Let's change the endianness and retry.
+		if (retry && status.LastError == NV_err_chksum_mismatch)
+		{
+			printf("Restarting the update sequence.\n");
+			retry = 0;
+			bl.IS_BIG_ENDIAN = !bl.IS_BIG_ENDIAN;
+			goto FirmwareUpdateSequence;
+		}
 		return BL_FAILURE;
 	}
 	printf("Validation successful.\n");
@@ -329,7 +386,7 @@ int update_firmware(string& hid_device_path, string& hex_file_path)
 	retval = bl.Reset();
 	printf("Reset returned %d.\n", retval);
 	if( retval != BL_SUCCESS ) return retval;
-	usleep(10000);
+	usleep(100000);
 
 	// Check status.
 	if (bl.GetStatus( status ) != BL_SUCCESS || status.LastError != NV_err_none)
@@ -369,6 +426,35 @@ int main (int argc, char * argv[])
 		return 0;
 	}
 
+	if (argc > 1 && strcmp(argv[1], "-l") == 0)
+	{
+		vector<string> devices;
+
+		if (argc < 3)
+		{
+			devices = find_cirque_devices();
+		}
+		else
+		{
+			devices.push_back(string(argv[2]));
+		}
+
+		printf("Available devices:\n");
+		for (int i = 0; i < devices.size(); ++i)
+		{
+			get_device_attributes(devices[i]);
+		}
+
+		return 0;
+	}
+
+	if (argc > 1 && strcmp(argv[1], "-v") == 0)
+	{
+		printf("Cirque touchpad firmware updater %s (%s)\n%s\n", VERSION, DATE, COPYRIGHT);
+
+		return 0;
+	}
+
 	switch( argc )
 	{
 		case 3:
@@ -380,7 +466,17 @@ int main (int argc, char * argv[])
 			if( strcmp( argv[1], "-a" ) == 0 )
 			{
 				// Get and output the version number.
-				ret = get_fw_version(device);
+				// Suppress all standard output temporarily.
+				int fd = dup(1);
+				close(1);
+				uint16_t ver = 0;
+				ret = get_fw_version(device, ver);
+				// Resume standard output.
+				fflush(stdout);
+				dup2(fd, 1);
+				close(fd);
+				if(ret == 0) printf("%02X.%02X\n", ver >> 8, ver & 0xFF);
+				return ret;
 			}
 			else if( strcmp( argv[1], "-n" ) == 0 )
 			{
@@ -394,11 +490,18 @@ int main (int argc, char * argv[])
 				fw_file = argv[1];
 				printf("Updating device %s with firmware from %s\n", device.c_str(), fw_file.c_str());
 				ret = update_firmware(device, fw_file);
+				if(ret != BL_SUCCESS)
+					printf("Firmware update failed.\n");
 			}
 			chmod( argv[2], mode.st_mode );
 			return ret;
 		default:
-			printf("Bad syntax.\n");
+			printf("To update firmware, enter:\n");
+			printf("  sudo %s <firmware_filepath> <device_filepath>\n", argv[0]);
+			printf("To find the device path, list all available devices by running:\n");
+			printf("  sudo %s -l\n", argv[0]);
+			printf("To get the version of this firmware update tool, enter:\n");
+			printf("  sudo %s -v\n", argv[0]);
 			return -1;
 	}
 	

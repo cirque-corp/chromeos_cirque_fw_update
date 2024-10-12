@@ -111,7 +111,7 @@ class CirqueBootloaderCollection
 	void PadBuffer(vector<uint8_t> &data);
 	void ParseReadDataFromStatus(vector<uint8_t> &status_data, uint32_t &addr, uint16_t &length, vector<uint8_t> &return_buffer);
 	uint16_t Fletcher_16(uint8_t *dataPtr, size_t bytes);
-	uint32_t Fletcher_32(uint8_t *dataPtr, size_t bytes);
+	uint32_t Fletcher_32(uint16_t *dataPtr, size_t bytes);
 
 	int BootloaderSetFeature(vector<uint8_t> &data);
 	int BootloaderGetFeature(vector<uint8_t> &data);
@@ -119,6 +119,7 @@ class CirqueBootloaderCollection
 	public:
 	CirqueBootloaderCollection(string& device_path, int report_id = 7);
 	~CirqueBootloaderCollection();
+	bool IsConnected() { return (this->fd != -1); }
 
 	int IS_BIG_ENDIAN;
 
@@ -136,7 +137,7 @@ class CirqueBootloaderCollection
 	int Flush( void );
 	int Validate( ValidationType Validation );
 
-	int GetVersionInfo(uint16_t &vid, uint16_t &pid, uint16_t &rev);
+	int GetVersionInfo(uint16_t &vid, uint16_t &pid, uint16_t &ver, uint32_t &rev);
 };
 
 #endif //__CIRQUE_BOOTLOADER_COLLECTION_H__
