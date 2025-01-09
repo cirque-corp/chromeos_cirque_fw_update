@@ -2,23 +2,23 @@ CIRQUE TOUCH FIRMWARE UPDATER FOR CHROME OS
 
 Software Revision History
 
-1.0.0 (2029-05-29)
+1.0.0 (2019-05-29)
 Initial release.
 
-1.0.1 (2029-05-31)
+1.0.1 (2019-05-31)
 Included <stdexcept> to fix an ebuild error.
 
-1.0.2 (2029-07-16)
+1.0.2 (2019-07-16)
 Changed the Cirque software license to Apache.
 Updated device status evaluation to support new bootloader code.
 
-1.0.3 (2029-07-18)
+1.0.3 (2019-07-18)
 Updated Makefile to use build environment.
 
-1.0.4 (2029-07-18)
+1.0.4 (2019-07-18)
 Removed exception handling to enable the code to be built in Chrome OS SDK.
 
-1.0.5 (2029-07-19)
+1.0.5 (2019-07-19)
 Enabled access to the device to allow the code to work without running as root.
 
 2.0.7 (2024-10-11)
