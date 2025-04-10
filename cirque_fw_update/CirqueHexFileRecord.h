@@ -34,14 +34,15 @@ enum RecordType
 class CirqueHexFileRecord
 {
 public:
+	CirqueHexFileRecord();
 	CirqueHexFileRecord( string& s );
 	~CirqueHexFileRecord();
 
 	vector<uint8_t> buf;
+	uint32_t address;
 
 private:
 	RecordType rtype;
-	uint32_t address;
 	static uint32_t extendedAddress;
 	static uint32_t segmentAddress;
 	bool valid = false;

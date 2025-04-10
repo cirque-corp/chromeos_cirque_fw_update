@@ -20,6 +20,10 @@ limitations under the License.
 uint32_t CirqueHexFileRecord::extendedAddress = 0;
 uint32_t CirqueHexFileRecord::segmentAddress = 0;
 
+CirqueHexFileRecord::CirqueHexFileRecord()
+{
+}
+
 CirqueHexFileRecord::CirqueHexFileRecord( string& s )
 {
 	uint32_t checksum = 0;
@@ -35,7 +39,7 @@ CirqueHexFileRecord::CirqueHexFileRecord( string& s )
 		for( int i = 1; i < s.size() && valid_hex( s[i] ) && valid_hex( s[i + 1] ); i += 2 )
 		{
 			u = hex_to_nibble( s[i] ) << 4;
-			u |= hex_to_nibble( s[i + 1] );
+			u |= hex_to_nibble( s[i + 1] );	
 			Q.push_back( u );
 		}
 

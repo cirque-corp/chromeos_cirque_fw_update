@@ -32,6 +32,7 @@ class CirqueHexFileParser
 private:
 	string filename;
 	bool done = false;
+	bool bin = false;
 	uint32_t startSegmentAddress;
 	uint32_t startLinearAddress;
 
@@ -42,6 +43,9 @@ public:
 	CirqueHexFileParser( string& Filename );
 	~CirqueHexFileParser();
 	int Parse();
+	int WriteBin(string& Filename);
+	int ReadBin();
+	uint32_t Fletcher_32(uint16_t *dataPtr, size_t bytes);
 };
 
 #endif //__CIRQUE_HEX_FILE_PARSER_H__

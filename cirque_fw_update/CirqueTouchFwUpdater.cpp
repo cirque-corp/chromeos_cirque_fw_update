@@ -25,9 +25,9 @@ limitations under the License.
 #include "CirqueDevData.h"
 #include "CirqueHexFileParser.h"
 
-#define VERSION "2.0.7"
-#define DATE "2024-09-17"
-#define COPYRIGHT "Copyright (c) 2024 Cirque Corporation\nAll rights reserved."
+#define VERSION "2.1.1"
+#define DATE "2025-04-10"
+#define COPYRIGHT "Copyright (c) 2025 Cirque Corporation\nAll rights reserved."
 
 using namespace std;
 
@@ -169,7 +169,7 @@ uint16_t get_device_attributes(string& hid_device_path)
 	}
 	else
 	{
-		printf("Failed to get device firmware version.\n" );
+		printf("%s: Failed to get device firmware version.\n", hid_device_path.c_str());
 	}
 	return ver;
 }
@@ -222,10 +222,10 @@ int update_firmware(string& hid_device_path, string& hex_file_path)
 	switch( retval )
 	{
 		case HEX_NOFILE:
-			printf("Firmware file %s does not exist.\nFirmware update failed.\n", hex_file_path.c_str());
+			printf("Firmware file %s does not exist.\n", hex_file_path.c_str());
 			return retval;
 		case HEX_CORRUPT:
-			printf("Firmware file %s is corrupted.\nFirmware update failed.\n", hex_file_path.c_str());
+			printf("Firmware file %s is corrupted.\n", hex_file_path.c_str());
 			return retval;
 		default:
 			break;
