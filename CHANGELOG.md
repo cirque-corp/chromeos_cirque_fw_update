@@ -4,6 +4,22 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.2.2] - 2026-09-11
+
+### Added
+
+- Added a progress output string to facilitate debugging.
+
+### Fixed
+
+- Fixed an error in retrieving firmware revision in the case of big-endian byte order.
+
+## [2.2.1] - 2026-06-23
+
+### Added
+
+- Implemented updating bootloader along with the main firmware.
+
 ## [2.1.1] - 2025-04-10
 
 ### Added

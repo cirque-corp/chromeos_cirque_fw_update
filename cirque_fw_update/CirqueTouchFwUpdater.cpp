@@ -1,5 +1,5 @@
 /*
-Copyright 2019 Cirque Corporation
+Copyright 2019-26 Cirque Corporation
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -25,9 +25,9 @@ limitations under the License.
 #include "CirqueDevData.h"
 #include "CirqueHexFileParser.h"
 
-#define VERSION "2.1.1"
-#define DATE "2025-04-10"
-#define COPYRIGHT "Copyright (c) 2025 Cirque Corporation\nAll rights reserved."
+#define VERSION "2.2.2"
+#define DATE "2026-09-11"
+#define COPYRIGHT "Copyright (c) 2026 Cirque Corporation\nAll rights reserved."
 
 using namespace std;
 
@@ -199,6 +199,193 @@ int get_fw_version(string& hid_device_path, uint16_t& ver)
 	return BL_SUCCESS;
 }
 
+int FirmwareUpdateSequence(CirqueBootloaderCollection* bl, CirqueHexFileParser* hfp, int retry)
+{
+	if (bl == NULL)
+	{
+		printf("NULL bootloader pointer.\n");
+		return BL_FAILURE;
+	}
+	if (hfp == NULL)
+	{
+		printf("NULL hex file parser pointer.\n");
+		return BL_FAILURE;
+	}
+
+	// Get timing values.
+	uint32_t FormatImageDelay = 100;
+	uint32_t FormatRegionsPageDelay = 50;
+	uint32_t PageWriteDelay = 10;
+
+	CirqueBootloaderStatus status;
+	int retval = bl->GetStatus( status );
+	printf("GetStatus returned %d.\n", retval);
+	if( retval != BL_SUCCESS ) return retval;
+
+	printf( "Status: Sentinel 0x%04X Version 0x%02X Error %d\n", status.Sentinel, status.Version, status.LastError );
+
+	if( status.LastError != NV_err_none )
+	{
+		// Clear the error and retry.
+		retval = bl->Reset();
+		printf("Reset returned %d.\n", retval);
+		if( retval != BL_SUCCESS ) return retval;
+		usleep(100000);
+
+		// Check status.
+		if (bl->GetStatus( status ) != BL_SUCCESS || status.LastError != NV_err_none)
+		{
+			printf("GetStatus after reset failed with error %d.\n", status.LastError);
+			return BL_FAILURE;
+		}
+	}
+
+	if (hfp->bootloader && status.Version == hfp->REV)
+	{
+		printf("Bootloader is up to date.\n");
+		return BL_SUCCESS;
+	}
+
+	// Invoke bootloader.
+	if( status.Sentinel == 0x5AC3 || status.Sentinel == 0x6D49 || status.Sentinel == 0x426C )
+	{
+		retval = bl->Invoke();
+		printf("Invoke bootloader returned %d.\n", retval);
+		if( retval != BL_SUCCESS ) return retval;
+		usleep(100000);
+
+		retval = bl->GetStatus( status );
+		printf("GetStatus returned %d.\n", retval);
+		if( retval != BL_SUCCESS ) return retval;
+
+		printf( "Status: Sentinel 0x%04X Version 0x%02X Error %d\n", status.Sentinel, status.Version, status.LastError );
+
+	}
+
+	if( status.Version >= 0x08)
+	{
+		FormatRegionsPageDelay = status.RegionFormatDelayMsPer1K;
+		PageWriteDelay = status.ByteWriteDelayUs;
+	}
+	printf("Timing values: FormatImageDelay %d, FormatRegionsPageDelay %d, PageWriteDelay %d.\n", FormatImageDelay, FormatRegionsPageDelay, PageWriteDelay);
+
+	// Format image.
+	uint32_t EntryPoint = hfp->recList[0]->buf[4] |
+						( hfp->recList[0]->buf[5] << 8 ) |
+						( hfp->recList[0]->buf[6] << 16 ) |
+						( hfp->recList[0]->buf[7] << 24 );
+
+	uint8_t TargetI2CAddress = 0x2C;
+	uint16_t TargetHIDDescAddr = 0x0020;
+	if( status.Version >= 0x09)
+	{
+		TargetI2CAddress = 0xFF;
+		TargetHIDDescAddr = 0xFFFF;
+	}
+
+	printf("FormatImage called with size %d, entry point 0x%08X, I2C address 0x%02X, HID descriptor address 0x%04X.\n", (uint8_t)hfp->recList.size(), EntryPoint, TargetI2CAddress, TargetHIDDescAddr );
+	retval = bl->FormatImage( (uint8_t)hfp->recList.size(), EntryPoint, TargetI2CAddress, TargetHIDDescAddr );
+	printf("FormatImage returned %d.\n", retval);
+	if( retval != BL_SUCCESS ) return retval;
+
+	usleep(FormatImageDelay * 1000);
+
+	// Format regions.
+	for( int temp = 0; temp < hfp->recList.size(); temp++ )
+	{
+		printf("FormatRegion called for region %d with offset 0x%08X and buffer size %ld.\n", (uint8_t)temp, hfp->recList[temp]->getAddress(), hfp->recList[temp]->buf.size());
+		retval = bl->FormatRegion( (uint8_t)temp, hfp->recList[temp]->getAddress(), hfp->recList[temp]->buf );
+		printf("FormatRegion returned %d.\n", retval);
+		if( retval != BL_SUCCESS ) return retval;
+
+		usleep((FormatRegionsPageDelay * 1000 * ((hfp->recList[temp]->buf.size() / 1024) + 1)));
+
+		if (bl->GetStatus( status ) != BL_SUCCESS || status.LastError != NV_err_none)
+		{
+			printf("GetStatus failed with error %d.\n", status.LastError);
+			return BL_FAILURE;
+		}
+		printf("GetStatus returned %d.\n", BL_SUCCESS);
+	}
+
+	// Write data.
+	uint32_t Length, MaxDataPayloadSize = 520; // must be even, better if multiple of 4 (520 / 4 = 130)
+
+	for (int i = 0; i < hfp->recList.size(); i++)
+	{
+		Length = (uint32_t)hfp->recList[i]->buf.size();
+		printf("Writing %d bytes of data.\n", Length);
+
+		while (Length > 0)
+		{
+			uint32_t PayloadSize = ( Length > MaxDataPayloadSize ) ? MaxDataPayloadSize : Length;
+
+			vector<uint8_t> Payload;
+			Payload.clear();
+			Payload.insert( Payload.end(), hfp->recList[i]->buf.begin() + hfp->recList[i]->buf.size() - Length, hfp->recList[i]->buf.begin() + hfp->recList[i]->buf.size() - Length + PayloadSize );
+
+			retval = bl->WriteData( (uint32_t)hfp->recList[i]->getAddress() + (hfp->recList[i]->buf.size() - Length), PayloadSize, Payload );
+			if( retval != BL_SUCCESS ) return retval;
+
+			usleep( ( PageWriteDelay * PayloadSize > 1000 ) ? PageWriteDelay * PayloadSize : 1000 );
+
+			if (bl->GetStatus( status ) != BL_SUCCESS || status.LastError != NV_err_none)
+			{
+				printf("GetStatus while writing data failed with error %d.\n", status.LastError);
+				return BL_FAILURE;
+			}
+			// printf("WriteData length %d.\n", Length);
+
+			Length = ( Length > MaxDataPayloadSize ) ? Length - MaxDataPayloadSize : 0;
+		}
+	}
+
+	// Flush.
+	bl->Flush();
+	usleep(10000);
+	if (bl->GetStatus( status ) != BL_SUCCESS || status.LastError != NV_err_none)
+	{
+		printf("GetStatus after flushing failed with error %d.\n", status.LastError);
+		return BL_FAILURE;
+	}
+	printf("Flush successful.\n");
+
+	// Validate.
+	bl->Validate(EntireImage);
+	usleep(10000);
+	if (bl->GetStatus( status ) != BL_SUCCESS || status.LastError != NV_err_none)
+	{
+		printf("GetStatus after image validation failed with error %d.\n", status.LastError);
+		// If we failed with checksum mismatch, it's possible we used the wrong endianness.
+		// Let's change the endianness and retry.
+		if (retry && status.LastError == NV_err_chksum_mismatch)
+		{
+			printf("Restarting the update sequence.\n");
+			retry = 0;
+			bl->IS_BIG_ENDIAN = !bl->IS_BIG_ENDIAN;
+			return FirmwareUpdateSequence(bl, hfp, retry);
+		}
+		return BL_FAILURE;
+	}
+	printf("Validation successful.\n");
+
+	// Reset.
+	retval = bl->Reset();
+	printf("Reset returned %d.\n", retval);
+	if( retval != BL_SUCCESS ) return retval;
+	usleep(100000);
+
+	// Check status.
+	if (bl->GetStatus( status ) != BL_SUCCESS || status.LastError != NV_err_none)
+	{
+		printf("GetStatus after reset failed with error %d.\n", status.LastError);
+		return BL_FAILURE;
+	}
+	printf("Firmware update successful.\n");
+
+	return BL_SUCCESS;
+}
+
 int update_firmware(string& hid_device_path, string& hex_file_path)
 {
 	CirqueBootloaderCollection bl(hid_device_path);
@@ -219,184 +406,38 @@ int update_firmware(string& hid_device_path, string& hex_file_path)
 	// Load and parse the hex file.
 	CirqueHexFileParser hfp(hex_file_path);
 	int retval = hfp.Parse();
-	switch( retval )
+	switch (retval)
 	{
-		case HEX_NOFILE:
-			printf("Firmware file %s does not exist.\n", hex_file_path.c_str());
+	case HEX_NOFILE:
+		printf("Firmware file %s does not exist.\n", hex_file_path.c_str());
+		return retval;
+	case HEX_CORRUPT:
+		printf("Firmware file %s is corrupted.\n", hex_file_path.c_str());
+		return retval;
+	default:
+		break;
+	}
+	printf("Finished parsing %s: %d images.\n", hex_file_path.c_str(), hfp.images);
+	switch (hfp.images)
+	{
+	case 2:
+		// We have two firmware images in this file.
+		// Flash the bootloader image.
+		printf("Updating bootloader...\n");
+		retval = FirmwareUpdateSequence(&bl, hfp.hfpBl, retry);
+		if (retval != BL_SUCCESS)
+		{
+			printf("Bootloader update failed.\n");
 			return retval;
-		case HEX_CORRUPT:
-			printf("Firmware file %s is corrupted.\n", hex_file_path.c_str());
-			return retval;
-		default:
-			break;
-	}
-	printf("Finished parsing %s: %d records.\n", hex_file_path.c_str(), (int)hfp.recList.size());
-
-	FirmwareUpdateSequence:
-	// Get timing values.
-	uint32_t FormatImageDelay = 100;
-	uint32_t FormatRegionsPageDelay = 50;
-	uint32_t PageWriteDelay = 10;
-
-	CirqueBootloaderStatus status;
-	retval = bl.GetStatus( status );
-	printf("GetStatus returned %d.\n", retval);
-	if( retval != BL_SUCCESS ) return retval;
-
-	printf( "Status: Sentinel 0x%04X Version 0x%02X Error %d\n", status.Sentinel, status.Version, status.LastError );
-
-	if( status.LastError != NV_err_none )
-	{
-		// Clear the error and retry.
-		retval = bl.Reset();
-		printf("Reset returned %d.\n", retval);
-		if( retval != BL_SUCCESS ) return retval;
-		usleep(100000);
-
-		// Check status.
-		if (bl.GetStatus( status ) != BL_SUCCESS || status.LastError != NV_err_none)
-		{
-			printf("GetStatus after reset failed with error %d.\n", status.LastError);
-			return BL_FAILURE;
 		}
+		// Fall through to the application image.
+	case 1:
+	case 0:
+	default:
+		printf("Updating firmware...\n");
+		return FirmwareUpdateSequence(&bl, &hfp, retry);
 	}
-
-	// Invoke bootloader.
-	if( status.Sentinel == 0x5AC3 || status.Sentinel == 0x6D49 || status.Sentinel == 0x426C )
-	{
-		retval = bl.Invoke();
-		printf("Invoke bootloader returned %d.\n", retval);
-		if( retval != BL_SUCCESS ) return retval;
-		usleep(100000);
-
-		retval = bl.GetStatus( status );
-		printf("GetStatus returned %d.\n", retval);
-		if( retval != BL_SUCCESS ) return retval;
-
-		printf( "Status: Sentinel 0x%04X Version 0x%02X Error %d\n", status.Sentinel, status.Version, status.LastError );
-
-	}
-	if( status.Version >= 0x08)
-	{
-		FormatRegionsPageDelay = status.RegionFormatDelayMsPer1K;
-		PageWriteDelay = status.ByteWriteDelayUs;
-	}
-	printf("Timing values: FormatImageDelay %d, FormatRegionsPageDelay %d, PageWriteDelay %d.\n", FormatImageDelay, FormatRegionsPageDelay, PageWriteDelay);
-
-	// Format image.
-	uint32_t EntryPoint = hfp.recList[0]->buf[4] |
-						( hfp.recList[0]->buf[5] << 8 ) |
-						( hfp.recList[0]->buf[6] << 16 ) |
-						( hfp.recList[0]->buf[7] << 24 );
-
-	uint8_t TargetI2CAddress = 0x2C;
-	uint16_t TargetHIDDescAddr = 0x0020;
-	if( status.Version >= 0x09)
-	{
-		TargetI2CAddress = 0xFF;
-		TargetHIDDescAddr = 0xFFFF;
-	}
-
-	printf("FormatImage called with size %d, entry point 0x%08X, I2C address 0x%02X, HID descriptor address 0x%04X.\n", (uint8_t)hfp.recList.size(), EntryPoint, TargetI2CAddress, TargetHIDDescAddr );
-	retval = bl.FormatImage( (uint8_t)hfp.recList.size(), EntryPoint, TargetI2CAddress, TargetHIDDescAddr );
-	printf("FormatImage returned %d.\n", retval);
-	if( retval != BL_SUCCESS ) return retval;
-
-	usleep(FormatImageDelay * 1000);
-
-	// Format regions.
-	for( int temp = 0; temp < hfp.recList.size(); temp++ )
-	{
-		retval = bl.FormatRegion( (uint8_t)temp, hfp.recList[temp]->getAddress(), hfp.recList[temp]->buf );
-		printf("FormatRegion returned %d.\n", retval);
-		if( retval != BL_SUCCESS ) return retval;
-
-		usleep((FormatRegionsPageDelay * 1000 * ((hfp.recList[temp]->buf.size() / 1024) + 1)));
-
-		if (bl.GetStatus( status ) != BL_SUCCESS || status.LastError != NV_err_none)
-		{
-			printf("GetStatus failed with error %d.\n", status.LastError);
-			return BL_FAILURE;
-		}
-		printf("GetStatus returned %d.\n", BL_SUCCESS);
-	}
-
-	// Write data.
-	uint32_t Length, MaxDataPayloadSize = 520; // must be even, better if multiple of 4 (520 / 4 = 130)
-
-	for (int i = 0; i < hfp.recList.size(); i++)
-	{
-		Length = (uint32_t)hfp.recList[i]->buf.size();
-		printf("Writing %d bytes of data.\n", Length);
-
-		while (Length > 0)
-		{
-			uint32_t PayloadSize = ( Length > MaxDataPayloadSize ) ? MaxDataPayloadSize : Length;
-
-			vector<uint8_t> Payload;
-			Payload.clear();
-			Payload.insert( Payload.end(), hfp.recList[i]->buf.begin() + hfp.recList[i]->buf.size() - Length, hfp.recList[i]->buf.begin() + hfp.recList[i]->buf.size() - Length + PayloadSize );
-
-			retval = bl.WriteData( (uint32_t)hfp.recList[i]->getAddress() + (hfp.recList[i]->buf.size() - Length), PayloadSize, Payload );
-			if( retval != BL_SUCCESS ) return retval;
-
-			usleep( ( PageWriteDelay * PayloadSize > 1000 ) ? PageWriteDelay * PayloadSize : 1000 );
-
-			if (bl.GetStatus( status ) != BL_SUCCESS || status.LastError != NV_err_none)
-			{
-				printf("GetStatus while writing data failed with error %d.\n", status.LastError);
-				return BL_FAILURE;
-			}
-			// printf("WriteData length %d.\n", Length);
-
-			Length = ( Length > MaxDataPayloadSize ) ? Length - MaxDataPayloadSize : 0;
-		}
-	}
-
-	// Flush.
-	bl.Flush();
-	usleep(10000);
-	if (bl.GetStatus( status ) != BL_SUCCESS || status.LastError != NV_err_none)
-	{
-		printf("GetStatus after flushing failed with error %d.\n", status.LastError);
-		return BL_FAILURE;
-	}
-	printf("Flush successful.\n");
-
-	// Validate.
-	bl.Validate(EntireImage);
-	usleep(10000);
-	if (bl.GetStatus( status ) != BL_SUCCESS || status.LastError != NV_err_none)
-	{
-		printf("GetStatus after image validation failed with error %d.\n", status.LastError);
-		// If we failed with checksum mismatch, it's possible we used the wrong endianness.
-		// Let's change the endianness and retry.
-		if (retry && status.LastError == NV_err_chksum_mismatch)
-		{
-			printf("Restarting the update sequence.\n");
-			retry = 0;
-			bl.IS_BIG_ENDIAN = !bl.IS_BIG_ENDIAN;
-			goto FirmwareUpdateSequence;
-		}
-		return BL_FAILURE;
-	}
-	printf("Validation successful.\n");
-
-	// Reset.
-	retval = bl.Reset();
-	printf("Reset returned %d.\n", retval);
-	if( retval != BL_SUCCESS ) return retval;
-	usleep(100000);
-
-	// Check status.
-	if (bl.GetStatus( status ) != BL_SUCCESS || status.LastError != NV_err_none)
-	{
-		printf("GetStatus after reset failed with error %d.\n", status.LastError);
-		return BL_FAILURE;
-	}
-	printf("Firmware update successful.\n");
-
-	return 0;
+	return BL_SUCCESS;
 }
 
 int main (int argc, char * argv[])

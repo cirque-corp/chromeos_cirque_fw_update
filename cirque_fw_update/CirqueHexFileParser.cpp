@@ -17,16 +17,23 @@ limitations under the License.
 #include <fstream>
 #include "CirqueHexFileParser.h"
 
+CirqueHexFileParser::CirqueHexFileParser()
+{
+}
+
 CirqueHexFileParser::CirqueHexFileParser( string& Filename )
 {
 	filename = Filename;
 	// Check the file signature.
 	char buffer[7] = { 0 };
 	ifstream file(filename, ios::binary | ios::in);
-	if (file.is_open() && file.read(buffer, 6) && string(buffer) == "Cirque")
+	if (file.is_open())
 	{
-		// We have a preparsed binary file. Set the flag to treat it accordingly.
-		bin = true;
+		if (file.read(buffer, 6) && string(buffer) == "Cirque")
+		{
+			// We have a preparsed binary file. Set the flag to treat it accordingly.
+			bin = true;
+		}
 		file.close();
 	}
 }
@@ -35,6 +42,7 @@ CirqueHexFileParser::~CirqueHexFileParser()
 {
 	for( unsigned i = 0; i < recList.size(); ++i )
 		delete recList[i];
+	delete hfpBl;
 }
 
 int CirqueHexFileParser::Parse()
@@ -94,6 +102,66 @@ int CirqueHexFileParser::Parse()
 	return HEX_SUCCESS;
 }
 
+int CirqueHexFileParser::WriteHeader(string& Filename, int count)
+{
+	ofstream file(Filename, ios::binary | ios::out);
+	if (file.is_open())
+	{
+		// Write the signature.
+		file.write("Cirque", 6);
+		// Write version number.
+		uint16_t version = FORMAT_VERSION;
+		file.write((char*)&version, 2);
+		// Write payload count.
+		uint32_t temp = count;
+		file.write((char*)&temp, 4);
+		file.close();
+	}
+	return HEX_SUCCESS;
+}
+
+int CirqueHexFileParser::WriteImage(string& Filename)
+{
+	ofstream file(Filename, ios::binary | ios::out | ios::app);
+	if (file.is_open() && recList.size() > 0)
+	{
+		// Write image header.
+		uint16_t attribute = VID;
+		file.write((char*)&attribute, 2);
+		attribute = PID;
+		file.write((char*)&attribute, 2);
+		attribute = REV;
+		file.write((char*)&attribute, 2);
+		// Write image size.
+		uint32_t length = 14;
+		for (int i = 0; i < recList.size(); i++)
+		{
+			length += 12 + recList[i]->buf.size();
+		}
+		file.write((char*)&length, 4);
+		// Write record count.
+		uint32_t temp = recList.size();
+		file.write((char*)&temp, 4);
+		// Write records one by one.
+		for (int i = 0; i < recList.size(); i++)
+		{
+			// Write the address for the record.
+			temp = recList[i]->getAddress();
+			file.write((char*)&temp, 4);
+			// Write the length of the record.
+			temp = recList[i]->getSize();
+			file.write((char*)&temp, 4);
+			// Write the data.
+			file.write((char*)recList[i]->buf.data(), recList[i]->buf.size());
+			// Write checksum.
+			temp = Fletcher_32((uint16_t*)recList[i]->buf.data(), recList[i]->buf.size());
+			file.write((char*)&temp, 4);
+		}
+		file.close();
+	}
+	return HEX_SUCCESS;
+}
+
 int CirqueHexFileParser::WriteBin(string& Filename)
 {
 	ofstream file(Filename, ios::binary | ios::out);
@@ -126,6 +194,7 @@ int CirqueHexFileParser::WriteBin(string& Filename)
 
 int CirqueHexFileParser::ReadBin()
 {
+	int ret = HEX_CORRUPT;
 	ifstream file(filename, ios::binary | ios::in);
 	if (!file.is_open()) return HEX_NOFILE;
 	// Check the file signature.
@@ -138,40 +207,86 @@ int CirqueHexFileParser::ReadBin()
 		{
 			if (version == 0)
 			{
-				// Read record count.
-				uint32_t count = 0;
-				file.read((char*)&count, 4);
-				for (int i = 0; i < count; i++)
+				ret = ParseImage(file, this);
+			}
+			else if (version == 1)
+			{
+				if (file.read((char*)&images, 4))
 				{
-					// Create a record object.
-					rec = new CirqueHexFileRecord();
-					// Set record address.
-					file.read((char*)&rec->address, 4);
-					// Read record length.
-					uint32_t temp = 0;
-					file.read((char*)&temp, 4);
-					// Read data.
-					uint8_t* buffer = new uint8_t[temp];
-					file.read((char*)buffer, temp);
-					rec->buf.assign(buffer, buffer + temp);
-					delete[] buffer;
-					// Read checksum.
-					file.read((char*)&temp, 4);
-					if (temp == Fletcher_32((uint16_t*)rec->buf.data(), rec->buf.size()))
+					switch (images)
 					{
-						recList.push_back(rec);
-					}
-					else
-					{
-						delete rec;
-						return HEX_CORRUPT;
+						case 2:
+							// We have two firmware images in this file.
+							// Read the bootloader image.
+							hfpBl = new CirqueHexFileParser();
+							// Set the bootloader flag.
+							hfpBl->bootloader = true;
+							// Read image header.
+							file.read((char*)&hfpBl->VID, 2);
+							file.read((char*)&hfpBl->PID, 2);
+							file.read((char*)&hfpBl->REV, 2);
+							// Read image size.
+							file.read((char*)&hfpBl->length, 4);
+							ret = ParseImage(file, hfpBl);
+							// Check if we are in the right location.
+							if (ret != HEX_SUCCESS || file.tellg() != (12 + hfpBl->length))
+							{
+								ret = HEX_CORRUPT;
+								break;
+							}
+							// Fall through to the application image.
+						case 1:
+							// Read image header.
+							file.read((char*)&VID, 2);
+							file.read((char*)&PID, 2);
+							file.read((char*)&REV, 2);
+							// Read image size.
+							file.read((char*)&length, 4);
+							ret = ParseImage(file, this);
+							break;
+						default:
+							break;
 					}
 				}
 			}
 		}
-		file.close();
 	}
+	file.close();
 
+	return ret;
+}
+
+int CirqueHexFileParser::ParseImage(ifstream& file, CirqueHexFileParser* image)
+{
+	// Read record count.
+	uint32_t count = 0;
+	file.read((char*)&count, 4);
+	for (int i = 0; i < count; i++)
+	{
+		// Create a record object.
+		image->rec = new CirqueHexFileRecord();
+		// Set record address.
+		file.read((char*)&image->rec->address, 4);
+		// Read record length.
+		uint32_t temp = 0;
+		file.read((char*)&temp, 4);
+		// Read data.
+		uint8_t* buffer = new uint8_t[temp];
+		file.read((char*)buffer, temp);
+		image->rec->buf.assign(buffer, buffer + temp);
+		delete[] buffer;
+		// Read checksum.
+		file.read((char*)&temp, 4);
+		if (temp == Fletcher_32((uint16_t*)image->rec->buf.data(), image->rec->buf.size()))
+		{
+			image->recList.push_back(image->rec);
+		}
+		else
+		{
+			delete image->rec;
+			return HEX_CORRUPT;
+		}
+	}
 	return HEX_SUCCESS;
 }
 

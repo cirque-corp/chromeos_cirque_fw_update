@@ -23,6 +23,8 @@ limitations under the License.
 
 using namespace std;
 
+#define FORMAT_VERSION 0x0001
+
 #define HEX_SUCCESS  ( 0  )
 #define HEX_NOFILE   (-101)
 #define HEX_CORRUPT  (-102)
@@ -39,12 +41,21 @@ private:
 public:
 	CirqueHexFileRecord* rec;
 	vector<CirqueHexFileRecord*> recList;
+	CirqueHexFileParser* hfpBl = NULL;
+	uint32_t images = 0;
+	uint16_t VID, PID, REV;
+	uint32_t length = 0;
+	bool bootloader = false;
 
+	CirqueHexFileParser();
 	CirqueHexFileParser( string& Filename );
 	~CirqueHexFileParser();
 	int Parse();
+	static int WriteHeader(string& Filename, int count);
+	int WriteImage(string& Filename);
 	int WriteBin(string& Filename);
 	int ReadBin();
+	int ParseImage(ifstream& file, CirqueHexFileParser* image);
 	uint32_t Fletcher_32(uint16_t *dataPtr, size_t bytes);
 };
 

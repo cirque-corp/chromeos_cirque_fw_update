@@ -507,7 +507,7 @@ int CirqueBootloaderCollection::GetVersionInfo(uint16_t &vid, uint16_t &pid, uin
 		vid = bytes[1] | ((bytes[0] << 8) & 0xFF00);
 		pid = bytes[3] | ((bytes[2] << 8) & 0xFF00);
 		ver = bytes[5] | ((bytes[4] << 8) & 0xFF00);
-		rev = bytes[8] | ((bytes[8] << 8) & 0x0000FF00) | ((bytes[7] << 16) & 0x00FF0000) | ((bytes[6] << 24) & 0xFF000000);
+		rev = bytes[9] | ((bytes[8] << 8) & 0x0000FF00) | ((bytes[7] << 16) & 0x00FF0000) | ((bytes[6] << 24) & 0xFF000000);
 	}
 
 	return BL_SUCCESS;
